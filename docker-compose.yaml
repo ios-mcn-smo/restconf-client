@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: restconf-backend
+    environment:
+      - RESTCONF_BASE_URL=http://your-restconf-device-or-server:port
+    ports:
+      - "8080:8080"
+    networks:
+      - restconf-net
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: restconf-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"
+    networks:
+      - restconf-net
+
+networks:
+  restconf-net:
+    driver: bridge
