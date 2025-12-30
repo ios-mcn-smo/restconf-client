@@ -1,28 +1,24 @@
-version: "3.9"
-
 services:
   backend:
-    build:
-      context: ./backend
-    container_name: restconf-backend
+    build: ./backend
+    container_name: restconf-proxy
     environment:
-      - RESTCONF_BASE_URL=http://your-restconf-device-or-server:port
+      # REAL RESTCONF SERVER
+      - UPSTREAM_RESTCONF=http://10.0.2.2:8088/restconf
+      - RESTCONF_TOKEN=your-secret-token-here
     ports:
-      - "8080:8080"
-    networks:
-      - restconf-net
+      - "9000:9000"
+    networks: [ric-net]
 
   frontend:
-    build:
-      context: ./frontend
+    build: ./frontend
     container_name: restconf-frontend
-    depends_on:
-      - backend
     ports:
       - "8081:80"
-    networks:
-      - restconf-net
+    depends_on:
+      - backend
+    networks: [ric-net]
 
 networks:
-  restconf-net:
-    driver: bridge
+  ric-net:
+    external: true
