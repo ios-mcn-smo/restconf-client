@@ -1,64 +1,144 @@
-// src/components/Explorer.jsx
-
 import React, { useEffect, useState } from "react";
 import { RESTCONF_DATA } from "../config";
 
-export default function Explorer({ onSelectPath }) {
-  const [tree, setTree] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+/*
+  RESTCONF Explorer
+  - Preserves module-qualified keys (ietf-interfaces:interfaces)
+  - Builds RESTCONF paths correctly
+  - Uses list key=value instead of array indexes
+  - Strips optional top-level "data" wrapper (RFC 8040 compliant)
+*/
 
-  useEffect(() => {
-    loadRoot();
-  }, []);
+function normalizeRoot(json) {
+  return json?.data ?? json;
+}
 
-  async function loadRoot() {
-    setLoading(true);
-    setError("");
+function buildTree(data, basePath = "") {
+  if (!data || typeof data !== "object") return [];
 
-    try {
-      const resp = await fetch(`${RESTCONF_DATA}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const json = await resp.json();
-      setTree(json);
-    } catch (e) {
-      setError("Failed to load RESTCONF root: " + e.message);
-    } finally {
-      setLoading(false);
+  return Object.entries(data).map(([key, value]) => {
+    const currentPath = basePath
+      ? `${basePath}/${key}`
+      : key;
+
+    // LIST
+    if (Array.isArray(value)) {
+      return {
+        label: key,
+        path: currentPath,
+        children: value.map((item) => {
+          // Best-effort list key detection
+          const listKey =
+            item.name ??
+            item.id ??
+            item.key ??
+            Object.values(item)[0];
+
+          const listPath = `${currentPath}=${listKey}`;
+
+          return {
+            label: `${key}=${listKey}`,
+            path: listPath,
+            children: buildTree(item, listPath),
+          };
+        }),
+      };
     }
-  }
 
-  function renderNode(obj, path = "") {
-    if (!obj || typeof obj !== "object") return null;
+    // CONTAINER
+    if (typeof value === "object") {
+      return {
+        label: key,
+        path: currentPath,
+        children: buildTree(value, currentPath),
+      };
+    }
 
-    return (
-      <ul>
-        {Object.keys(obj).map((key) => {
-          const newPath = `${path}/${key}`;
+    // LEAF
+    return {
+      label: `${key}: ${String(value)}`,
+      path: currentPath,
+      value,
+      isLeaf: true,
+    };
+  });
+}
 
-          return (
-            <li key={newPath}>
-              <button onClick={() => onSelectPath(newPath)}>{key}</button>
-
-              {typeof obj[key] === "object" && (
-                <div style={{ marginLeft: "1rem" }}>
-                  {renderNode(obj[key], newPath)}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  }
+function TreeNode({ node, onSelect }) {
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <div>
-      <h2>RESTCONF Explorer</h2>
-      {loading && <p>Loading...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
+    <div style={{ marginLeft: "12px" }}>
+      <div
+        style={{ cursor: "pointer", userSelect: "none" }}
+        onClick={() => {
+          if (node.children) setExpanded(!expanded);
+          onSelect(node.path);
+        }}
+      >
+        {node.children && (expanded ? "▼ " : "▶ ")}
+        {node.label}
+      </div>
 
-      {tree ? renderNode(tree, "") : null}
+      {expanded &&
+        node.children &&
+        node.children.map((child, idx) => (
+          <TreeNode
+            key={idx}
+            node={child}
+            onSelect={onSelect}
+          />
+        ))}
     </div>
   );
 }
+
+export default function Explorer({ onSelectPath }) {
+  const [tree, setTree] = useState([]);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function loadRoot() {
+      try {
+        const resp = await fetch(RESTCONF_DATA, {
+          headers: {
+            Accept: "application/yang-data+json",
+          },
+        });
+
+        if (!resp.ok) {
+          throw new Error(`RESTCONF error: ${resp.status}`);
+        }
+
+        const json = await resp.json();
+
+        // 🔑 Normalize RFC 8040 "data" wrapper
+        const normalized = normalizeRoot(json);
+
+        setTree(buildTree(normalized));
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+
+    loadRoot();
+  }, []);
+
+  if (error) {
+    return <div className="text-red-500">Error: {error}</div>;
+  }
+
+  return (
+    <div className="p-2 text-sm">
+      <h2 className="font-bold mb-2">RESTCONF Explorer</h2>
+      {tree.map((node, idx) => (
+        <TreeNode
+          key={idx}
+          node={node}
+          onSelect={onSelectPath}
+        />
+      ))}
+    </div>
+  );
+}
+
